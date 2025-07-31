@@ -1,6 +1,15 @@
 services:
-  - type: web
-    name: team-selection
-    runtime: nodejs18
-    entrypoint: "node team-selection.js"
-    buildCommand: "npm install"
+    - type: web
+      name: team-selection
+      runtime: nodejs18
+      buildCommand: "npm install"
+      startCommand: "npm start"
+      env: static
+      staticPublishPath: .
+      routes:
+        - type: rewrite
+          source: /*
+          destination: /index.html
+        - type: rewrite
+          source: /team-selection
+          destination: /team-selection.js
