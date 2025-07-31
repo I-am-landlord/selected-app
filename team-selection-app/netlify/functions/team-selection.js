@@ -1,219 +1,122 @@
-// netlify/functions/team-selection.js
-// Netlify Functions для обробки вибору команд
+// Netlify Functions для обробки вибору команд (адаптовано для Render)
 
-const MAX_TEAM_SIZE = 30;
-const TEAMS = ['team1', 'team2', 'team3'];
+  console.log('team-selection.js loaded at', new Date().toISOString());
 
-// Простий in-memory store (для production використовуйте справжню БД)
-let teamData = {
-  selections: [],
-  counters: { team1: 0, team2: 0, team3: 0 }
-};
+  const http = require('http');
 
-// Функція для отримання IP користувача
-function getUserId(event) {
-  const ip = event.headers['x-forwarded-for'] || 
-           event.headers['x-real-ip'] || 
-           'unknown';
-  const userAgent = event.headers['user-agent'] || '';
-  // Створюємо унікальний ID на основі IP + User Agent
-  return `${ip}_${userAgent.slice(0, 50)}`.replace(/[^a-zA-Z0-9_]/g, '_');
-}
+  const MAX_TEAM_SIZE = 30;
+  const TEAMS = ['team1', 'team2', 'team3'];
 
-// Перевірка чи користувач вже вибрав команду
-function hasUserSelected(userId) {
-  return teamData.selections.some(selection => 
-    selection.userId === userId && selection.status === 'selected'
-  );
-}
-
-// Додавання користувача до команди
-function addUserToTeam(teamId, userId) {
-  teamData.selections.push({
-    teamId,
-    userId,
-    timestamp: Date.now(),
-    status: 'selected'
-  });
-  
-  teamData.counters[teamId]++;
-}
-
-// Головна функція обробки запитів
-exports.handler = async (event, context) => {
-  // CORS заголовки
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Max-Age': '86400'
+  let teamData = {
+    selections: [],
+    counters: { team1: 0, team2: 0, team3: 0 }
   };
 
-  // Обробка preflight запитів
-  if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers,
-      body: ''
-    };
+  // Функція для отримання IP користувача
+  function getUserId(req) {
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+    const userAgent = req.headers['user-agent'] || '';
+    const userId = `${ip}_${userAgent.slice(0, 50)}`.replace(/[^a-zA-Z0-9_]/g, '_');
+    console.log('Generated userId:', userId);
+    return userId;
   }
 
-  try {
-    const url = new URL(event.rawUrl);
-    const action = url.searchParams.get('action');
+  // Перевірка чи користувач вже вибрав команду
+  function hasUserSelected(userId) {
+    const result = teamData.selections.some(selection => 
+      selection.userId === userId && selection.status === 'selected'
+    );
+    console.log('User selected check:', { userId, result });
+    return result;
+  }
 
-    // GET запити - отримання даних команд
-    if (event.httpMethod === 'GET' && action === 'getTeamCounts') {
-      return {
-        statusCode: 200,
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache'
-        },
-        body: JSON.stringify({
-          success: true,
-          teams: teamData.counters,
-          timestamp: Date.now()
-        })
-      };
+  // Додавання користувача до команди
+  function addUserToTeam(teamId, userId) {
+    teamData.selections.push({
+      teamId,
+      userId,
+      timestamp: Date.now(),
+      status: 'selected'
+    });
+    teamData.counters[teamId]++;
+    console.log('Added user to team:', { teamId, userId, counters: teamData.counters });
+  }
+
+  const server = http.createServer((req, res) => {
+    console.log('Handler triggered at', new Date().toISOString(), ':', { method: req.method, url: req.url });
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Max-Age', '86400');
+
+    if (req.method === 'OPTIONS') {
+      console.log('Handling OPTIONS request');
+      res.writeHead(200);
+      res.end();
+      return;
     }
 
-    // POST запити - вибір команди
-    if (event.httpMethod === 'POST') {
-      const data = JSON.parse(event.body);
-      
-      if (data.action === 'selectTeam') {
-        const teamId = data.team;
-        const userId = getUserId(event);
-
-        // Валідація команди
-        if (!TEAMS.includes(teamId)) {
-          return {
-            statusCode: 400,
-            headers: { ...headers, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              success: false,
-              message: 'Невірна команда'
-            })
-          };
-        }
-
-        // Перевірка чи користувач вже вибрав команду
-        if (hasUserSelected(userId)) {
-          return {
-            statusCode: 400,
-            headers: { ...headers, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              success: false,
-              message: 'Ви вже обрали команду'
-            })
-          };
-        }
-
-        // Перевірка ліміту команди
-        if (teamData.counters[teamId] >= MAX_TEAM_SIZE) {
-          return {
-            statusCode: 200,
-            headers: { ...headers, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              success: true,
-              teamFull: true,
-              teams: teamData.counters,
-              message: 'Команда заповнена'
-            })
-          };
-        }
-
-        // Додаємо користувача до команди
-        addUserToTeam(teamId, userId);
-
-        return {
-          statusCode: 200,
-          headers: { ...headers, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            success: true,
-            teamFull: false,
-            teams: teamData.counters,
-            message: `Успішно приєдналися до ${teamId}`
-          })
-        };
+    if (req.method === 'GET' && req.url.startsWith('/?action=getTeamCounts')) {
+      console.log('Processing getTeamCounts - data:', JSON.stringify(teamData.counters));
+      if (!teamData.counters) {
+        console.error('teamData.counters is undefined!');
+        res.writeHead(500);
+        res.end(JSON.stringify({ success: false, message: 'Internal data error' }));
+        return;
       }
-    }
-
-    // GET запит для статистики (додатково)
-    if (event.httpMethod === 'GET' && action === 'getStats') {
-      const stats = {
-        totalSelections: teamData.selections.length,
-        teamBreakdown: teamData.counters,
-        lastActivity: Math.max(...teamData.selections.map(s => s.timestamp), 0)
-      };
-
-      return {
-        statusCode: 200,
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          success: true,
-          stats
-        })
-      };
-    }
-
-    // Невідомий запит
-    return {
-      statusCode: 404,
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        success: false,
-        message: 'Endpoint not found'
-      })
-    };
-
-  } catch (error) {
-    console.error('Function error:', error);
-    
-    return {
-      statusCode: 500,
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        success: false,
-        message: 'Server error: ' + error.message
-      })
-    };
-  }
-};
-
-// Функція для скидання даних (для тестування)
-exports.reset = async (event, context) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
-  };
-
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers, body: '' };
-  }
-
-  if (event.httpMethod === 'POST') {
-    teamData = {
-      selections: [],
-      counters: { team1: 0, team2: 0, team3: 0 }
-    };
-
-    return {
-      statusCode: 200,
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      const response = {
         success: true,
-        message: 'Data reset successfully'
-      })
-    };
-  }
+        teams: teamData.counters,
+        timestamp: Date.now()
+      };
+      console.log('getTeamCounts - response:', JSON.stringify(response));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(response));
+      return;
+    }
 
-  return {
-    statusCode: 405,
-    headers,
-    body: JSON.stringify({ success: false, message: 'Method not allowed' })
-  };
-};
+    if (req.method === 'POST' && req.url === '/?action=selectTeam') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        console.log('Processing selectTeam - start:', body);
+        const { team } = JSON.parse(body);
+        const userId = getUserId(req);
+
+        if (!TEAMS.includes(team)) {
+          console.log('Invalid team:', team);
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: 'Невірна команда' }));
+          return;
+        }
+
+        if (hasUserSelected(userId)) {
+          console.log('User already selected:', userId);
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: 'Ви вже обрали команду' }));
+          return;
+        }
+
+        if (teamData.counters[team] >= MAX_TEAM_SIZE) {
+          console.log('Team full:', team);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, teamFull: true, teams: teamData.counters, message: 'Команда заповнена' }));
+          return;
+        }
+
+        addUserToTeam(team, userId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, teamFull: false, teams: teamData.counters, message: `Успішно приєдналися до ${team}` }));
+      });
+      return;
+    }
+
+    console.log('Unknown endpoint:', { method: req.method, url: req.url });
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, message: 'Endpoint not found' }));
+  });
+
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
