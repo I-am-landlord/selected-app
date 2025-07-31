@@ -1,9 +1,9 @@
 [build]
   command = "echo 'No build step required'"
-  publish = "./team-selection-app"
+  publish = "."
 
 [functions]
-  directory = "team-selection-app/netlify/functions"
+  directory = "netlify/functions"
 
 [[redirects]]
   from = "/*"
@@ -16,7 +16,7 @@
   status = 200
 
 [dev]
-  command = "npx serve team-selection-app"
+  command = "npx serve ."
   port = 3000
-  publish = "team-selection-app"
-  functions = "team-selection-app/netlify/functions"
+  publish = "."
+  functions = "netlify/functions"
